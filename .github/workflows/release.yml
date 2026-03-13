@@ -134,19 +134,16 @@ jobs:
       # ── Multi-arch OCI index ─────────────────────────────────────────────────
 
       - name: Create and push multi-arch OCI index
-        id: oras_index
         run: |
-          DIGEST=$(oras manifest index create --format json \
+          oras manifest index create \
             "${{ env.IMAGE }}:${{ steps.tag.outputs.value }}" \
             "${{ env.IMAGE }}:${{ steps.tag.outputs.value }}-amd64" \
-            "${{ env.IMAGE }}:${{ steps.tag.outputs.value }}-arm64" \
-            | jq -r '.digest')
-          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+            "${{ env.IMAGE }}:${{ steps.tag.outputs.value }}-arm64"
 
       - name: Sign multi-arch OCI index (keyless)
         run: |
           cosign sign --yes \
-            "${{ env.IMAGE }}:${{ steps.tag.outputs.value }}@${{ steps.oras_index.outputs.digest }}"
+            "${{ env.IMAGE }}:${{ steps.tag.outputs.value }}"
 
       # ── Sign blobs for GitHub Release ────────────────────────────────────────
 
