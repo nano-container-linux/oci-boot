@@ -1,0 +1,101 @@
+version: '3'
+
+vars:
+  WORKDIR: '{{.TASKFILE_DIR}}'
+  ARCH: '{{default "arm64" .ARCH}}'
+  INITRD_OUT: '{{.WORKDIR}}/out/initrd-oci-{{.ARCH}}.gz'
+  INIT_GO_SRC: '{{.WORKDIR}}/src/init.go'
+  INIT_BIN: '{{.WORKDIR}}/out/init'
+  TMPDIR: '{{.WORKDIR}}/initrd-tmp'
+
+tasks:
+  default:
+    desc: default
+    deps:
+      - build
+
+  help:
+    desc: Show available public tasks
+    silent: true
+    cmds:
+      - |
+        cat <<'EOF'
+        Available tasks:
+          build         Build init and generate initrd into out/
+          clean         Remove generated artifacts from out/ and temp dirs
+          help          Show this help message
+          list          Alias of help
+        EOF
+
+  list:
+    desc: Alias for help
+    silent: true
+    cmds:
+      - task: help
+
+  build:
+    desc: Build init and generate initrd
+    dir: '{{.WORKDIR}}'
+    cmds:
+      - task: internal:deps
+      - task: internal:compile
+      - task: internal:stage-initrd
+      - task: internal:pack-initrd
+      - task: internal:verify-initrd
+
+  internal:deps:
+    internal: true
+    desc: Prepare Go dependencies
+    dir: '{{.WORKDIR}}'
+    cmds:
+      - go mod tidy
+
+  internal:compile:
+    internal: true
+    desc: Build static init binary
+    dir: '{{.WORKDIR}}'
+    env:
+      GOARCH: '{{.ARCH}}'
+      GOOS: linux
+      CGO_ENABLED: '0'
+    cmds:
+      - mkdir -p '{{.WORKDIR}}/out'
+      - go build -ldflags '-extldflags "-static"' -o '{{.INIT_BIN}}' '{{.INIT_GO_SRC}}'
+
+  internal:stage-initrd:
+    internal: true
+    desc: Stage init file for cpio
+    dir: '{{.WORKDIR}}'
+    cmds:
+      - rm -rf '{{.TMPDIR}}'
+      - mkdir -p '{{.TMPDIR}}'
+      - cp '{{.INIT_BIN}}' '{{.TMPDIR}}/init'
+      - chmod +x '{{.TMPDIR}}/init'
+      - ls -l '{{.TMPDIR}}'
+
+  internal:pack-initrd:
+    internal: true
+    desc: Create compressed initrd image
+    dir: '{{.WORKDIR}}'
+    cmds:
+      - cd '{{.TMPDIR}}' && find . | cpio -o -H newc | gzip -c > '{{.INITRD_OUT}}'
+      - rm -rf '{{.TMPDIR}}'
+      - "echo Initrd minimal généré avec cpio: {{.INITRD_OUT}}"
+
+  internal:verify-initrd:
+    internal: true
+    desc: Show initrd content when cpio is available
+    dir: '{{.WORKDIR}}'
+    cmds:
+      - |
+        if command -v cpio >/dev/null; then
+          gunzip -c '{{.INITRD_OUT}}' | cpio -vit
+        fi
+
+  clean:
+    desc: Remove generated artifacts
+    dir: '{{.WORKDIR}}'
+    cmds:
+      - rm -f '{{.INIT_BIN}}' '{{.INITRD_OUT}}'
+      - rm -rf '{{.TMPDIR}}'
+
