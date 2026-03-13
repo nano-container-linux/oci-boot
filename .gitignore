@@ -1,0 +1,8 @@
+out/
+initrd-tmp/
+.vscode/
+
+# Editor/OS noise
+*.swp
+*~
+.DS_Store

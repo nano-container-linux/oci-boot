@@ -1,0 +1,188 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v1.0.0)'
+        required: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  build:
+    name: Build initrd (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Set up Task
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install cpio and gzip
+        run: sudo apt-get install -y cpio gzip
+
+      - name: Build initrd
+        run: task build ARCH=${{ matrix.arch }}
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: initrd-${{ matrix.arch }}
+          path: |
+            out/initrd-oci-${{ matrix.arch }}.gz
+          if-no-files-found: error
+
+  sign-and-publish:
+    name: Sign, publish OCI & release
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: write    # GitHub Release
+      packages: write    # ghcr.io push
+      id-token: write    # cosign keyless OIDC
+
+    steps:
+      - name: Resolve release tag
+        id: tag
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "value=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Download amd64 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: initrd-amd64
+          path: dist/amd64
+
+      - name: Download arm64 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: initrd-arm64
+          path: dist/arm64
+
+      - name: Rename artifacts
+        run: |
+          mv dist/amd64/initrd-oci-amd64.gz dist/initrd-oci-amd64.gz
+          mv dist/arm64/initrd-oci-arm64.gz dist/initrd-oci-arm64.gz
+
+      # ── OCI tooling ─────────────────────────────────────────────────────────
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Install ORAS
+        uses: oras-project/setup-oras@v1
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── Push per-arch OCI artifacts ─────────────────────────────────────────
+
+      - name: Push amd64 OCI artifact
+        id: oras_amd64
+        working-directory: dist
+        run: |
+          DIGEST=$(oras push --format json \
+            "${{ env.IMAGE }}:${{ steps.tag.outputs.value }}-amd64" \
+            initrd-oci-amd64.gz:application/vnd.oci.image.layer.v1.tar+gzip \
+            | jq -r '.digest')
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Sign amd64 OCI artifact (keyless)
+        run: |
+          cosign sign --yes \
+            "${{ env.IMAGE }}:${{ steps.tag.outputs.value }}-amd64@${{ steps.oras_amd64.outputs.digest }}"
+
+      - name: Push arm64 OCI artifact
+        id: oras_arm64
+        working-directory: dist
+        run: |
+          DIGEST=$(oras push --format json \
+            "${{ env.IMAGE }}:${{ steps.tag.outputs.value }}-arm64" \
+            initrd-oci-arm64.gz:application/vnd.oci.image.layer.v1.tar+gzip \
+            | jq -r '.digest')
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Sign arm64 OCI artifact (keyless)
+        run: |
+          cosign sign --yes \
+            "${{ env.IMAGE }}:${{ steps.tag.outputs.value }}-arm64@${{ steps.oras_arm64.outputs.digest }}"
+
+      # ── Multi-arch OCI index ─────────────────────────────────────────────────
+
+      - name: Create and push multi-arch OCI index
+        id: oras_index
+        run: |
+          DIGEST=$(oras manifest index create --format json \
+            "${{ env.IMAGE }}:${{ steps.tag.outputs.value }}" \
+            "${{ env.IMAGE }}:${{ steps.tag.outputs.value }}-amd64" \
+            "${{ env.IMAGE }}:${{ steps.tag.outputs.value }}-arm64" \
+            | jq -r '.digest')
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Sign multi-arch OCI index (keyless)
+        run: |
+          cosign sign --yes \
+            "${{ env.IMAGE }}:${{ steps.tag.outputs.value }}@${{ steps.oras_index.outputs.digest }}"
+
+      # ── Sign blobs for GitHub Release ────────────────────────────────────────
+
+      - name: Sign release blobs (keyless)
+        working-directory: dist
+        run: |
+          for f in initrd-oci-amd64.gz initrd-oci-arm64.gz; do
+            cosign sign-blob --yes \
+              --bundle "${f}.bundle" \
+              "${f}"
+          done
+
+      # ── GitHub Release ───────────────────────────────────────────────────────
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.value }}
+          generate_release_notes: true
+          body: |
+            ## OCI artifact
+
+            Pull with ORAS:
+            ```
+            oras pull ${{ env.IMAGE }}:${{ steps.tag.outputs.value }}
+            ```
+
+            Verify signature (cosign keyless):
+            ```
+            cosign verify \
+              --certificate-identity-regexp="https://github.com/${{ github.repository }}/.github/workflows/release.yml" \
+              --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+              ${{ env.IMAGE }}:${{ steps.tag.outputs.value }}
+            ```
+          files: |
+            dist/initrd-oci-amd64.gz
+            dist/initrd-oci-amd64.gz.bundle
+            dist/initrd-oci-arm64.gz
+            dist/initrd-oci-arm64.gz.bundle

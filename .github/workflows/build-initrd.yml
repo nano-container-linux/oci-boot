@@ -1,0 +1,51 @@
+name: Build initrd
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-initrd:
+    name: Build initrd (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Setup Task
+        uses: arduino/setup-task@v2
+
+      - name: Install initrd dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cpio gzip
+
+      - name: Build initrd
+        run: task build ARCH=${{ matrix.arch }}
+
+      - name: Upload initrd artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: initrd-${{ matrix.arch }}
+          path: out/initrd-oci-${{ matrix.arch }}.gz
+          if-no-files-found: error
+
+      - name: Upload init binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: init-binary-${{ matrix.arch }}
+          path: out/init
+          if-no-files-found: error
