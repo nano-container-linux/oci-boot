@@ -629,4 +629,3 @@ func fetchBlob(ref string, plainHttp string) (BlobStream, int64) {
 	)
 	return BlobStream{io.TeeReader(blobResp.Body, bar), blobResp.Body.Close}, blobSize
 }
-
