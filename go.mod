@@ -2,7 +2,7 @@ module oci-init
 
 go 1.26.4
 
-toolchain go1.24.4
+toolchain go1.27.0
 
 require (
 	github.com/schollz/progressbar/v3 v3.19.0
