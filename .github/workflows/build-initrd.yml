@@ -37,14 +37,14 @@ jobs:
         run: task build ARCH=${{ matrix.arch }}
 
       - name: Upload initrd artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: initrd-${{ matrix.arch }}
           path: out/initrd-oci-${{ matrix.arch }}.gz
           if-no-files-found: error
 
       - name: Upload init binary artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: init-binary-${{ matrix.arch }}
           path: out/init

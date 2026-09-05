@@ -44,7 +44,7 @@ jobs:
         run: task build ARCH=${{ matrix.arch }}
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: initrd-${{ matrix.arch }}
           path: |
@@ -68,13 +68,13 @@ jobs:
           echo "value=${TAG}" >> "$GITHUB_OUTPUT"
 
       - name: Download amd64 artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: initrd-amd64
           path: dist/amd64
 
       - name: Download arm64 artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: initrd-arm64
           path: dist/arm64
