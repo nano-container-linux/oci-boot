@@ -26,7 +26,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Setup Task
-        uses: arduino/setup-task@v2
+        uses: arduino/setup-task@v3.0.0
 
       - name: Install initrd dependencies
         run: |
